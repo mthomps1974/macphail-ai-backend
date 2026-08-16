@@ -7,6 +7,8 @@
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -30,6 +32,55 @@ app.use(cors({
 }));
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+// --- Bookmarks: a simple shared list stored in a file on this server ---
+// Anyone using the site can add a bookmark, and everyone else sees it.
+// Note: because Render's free/starter disk isn't permanent storage, this
+// file resets if the service gets redeployed. Good enough for informal
+// day-to-day reference; ask if you want it made properly permanent later.
+const BOOKMARKS_FILE = path.join(__dirname, 'bookmarks.json');
+
+function readBookmarks() {
+  try {
+    return JSON.parse(fs.readFileSync(BOOKMARKS_FILE, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeBookmarks(list) {
+  fs.writeFileSync(BOOKMARKS_FILE, JSON.stringify(list, null, 2));
+}
+
+app.get('/api/bookmarks', (req, res) => {
+  res.json(readBookmarks());
+});
+
+app.post('/api/bookmarks', (req, res) => {
+  const { page, note, addedBy } = req.body || {};
+  const pageNum = Number(page);
+  if (!pageNum || pageNum < 1) {
+    return res.status(400).json({ error: 'Missing or invalid "page".' });
+  }
+  const list = readBookmarks();
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    page: pageNum,
+    note: String(note || '').slice(0, 300),
+    addedBy: String(addedBy || '').slice(0, 60),
+    addedAt: new Date().toISOString(),
+  };
+  list.unshift(entry);
+  if (list.length > 300) list.length = 300;
+  writeBookmarks(list);
+  res.json(list);
+});
+
+app.delete('/api/bookmarks/:id', (req, res) => {
+  const list = readBookmarks().filter(b => b.id !== req.params.id);
+  writeBookmarks(list);
+  res.json(list);
+});
 
 app.get('/', (req, res) => {
   res.send('Macphail AI Search backend is running.');
